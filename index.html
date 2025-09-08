@@ -1,37 +1,248 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mistral Chat</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mistral Chat</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="chat-container">
-  <div id="chat-box"></div>
-  <input type="text" id="user-input" placeholder="Type a message..." />
-  <button onclick="sendMessage()">Send</button>
-</div>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <button type="button" class="new-chat">➕ New Chat</button>
+      <div class="history-title" style="margin-top:12px;color:#fff;font-weight:600;">Chat History</div>
+      <ul id="chat-history" style="list-style:none;padding:8px 0;margin:0;overflow:auto;max-height:calc(100vh - 160px)"></ul>
+    </div>
 
-<script>
-async function sendMessage() {
-  const input = document.getElementById("user-input");
-  const chatBox = document.getElementById("chat-box");
-  const message = input.value.trim();
-  if (!message) return;
+    <!-- Chat container -->
+    <div class="chat-container">
+      <div class="chat-header">💬 Mistral AI Application</div>
+      
+      <div id="chat-box"></div>
 
-  chatBox.innerHTML += `<div class="user-msg">${message}</div>`;
-  input.value = "";
+      <div class="input-area">
+        <input type="text" id="user-input" placeholder="Type a message..." />
+        <button type="button" id="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
 
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message })
+  <script>
+  // ========== Safety helpers ==========
+  // Escape HTML but keep apostrophes readable
+  function escapeForHtml(s) {
+    if (s == null) return "";
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+      // intentionally NOT escaping apostrophe (') so text like it's appears normally
+  }
+
+  // Keep some sanitization (remove markdown tokens you asked earlier)
+  function cleanText(str) {
+    if (str == null) return "";
+    return String(str)
+      .replace(/\*/g, "")        // remove *
+      .replace(/#{1,6}/g, "")    // remove markdown headings like ###
+      .replace(/^- /gm, "")      // remove list dashes at line start
+      .replace(/✅/g, "")        // remove checkmarks
+      .replace(/---/g, "");      // remove dividers
+  }
+
+  // Convert text -> safe HTML with <br/> for newlines
+  function formatMessageHtml(raw) {
+    const cleaned = cleanText(raw);
+    const escaped = escapeForHtml(cleaned);
+    // preserve newlines by replacing with <br>
+    return escaped.split('\n').map(line => line || '').join('<br>');
+  }
+
+  // ========== DOM refs ==========
+  const chatBox = document.getElementById('chat-box');
+  const chatHistoryList = document.getElementById('chat-history');
+  const inputEl = document.getElementById('user-input');
+  const sendBtn = document.getElementById('send-btn');
+  const newChatBtn = document.querySelector('.new-chat');
+
+  // store history prompts (simple in-memory)
+  const historyPrompts = [];
+
+  // ========== Message rendering ==========
+  function appendUserMessage(text) {
+    const userDiv = document.createElement('div');
+    userDiv.className = 'user-msg';
+    userDiv.textContent = cleanText(text);
+    chatBox.appendChild(userDiv);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  function addBotMessage(text, originalPrompt) {
+    const botMessage = document.createElement('div');
+    botMessage.className = 'bot-msg';
+
+    // message text
+    const messageText = document.createElement('div');
+    messageText.className = 'bot-text';
+    messageText.innerHTML = formatMessageHtml(text);
+
+    // actions container
+    const actions = document.createElement('div');
+    actions.className = 'bot-actions';
+
+    const feedbackTitle = document.createElement('div');
+    feedbackTitle.className = 'feedback-title';
+    feedbackTitle.textContent = 'Feedback:';
+    actions.appendChild(feedbackTitle);
+
+    // Like button
+    const likeBtn = document.createElement('button');
+    likeBtn.type = 'button';
+    likeBtn.textContent = '👍 Like';
+    likeBtn.addEventListener('click', () => {
+      likeBtn.textContent = '✅ Liked';
+      likeBtn.disabled = true;
+    });
+    actions.appendChild(likeBtn);
+
+    // Dislike button
+    const dislikeBtn = document.createElement('button');
+    dislikeBtn.type = 'button';
+    dislikeBtn.textContent = '👎 Dislike';
+    dislikeBtn.addEventListener('click', () => {
+      dislikeBtn.textContent = '❌ Disliked';
+      dislikeBtn.disabled = true;
+    });
+    actions.appendChild(dislikeBtn);
+
+    // Try Again (retry) button
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.textContent = '🔄 Try Again';
+    retryBtn.addEventListener('click', () => {
+      // re-send the original prompt and show it as a user message
+      if (typeof originalPrompt === 'string' && originalPrompt.length) {
+        sendMessage(originalPrompt, { fromRetry: true });
+      }
+    });
+    actions.appendChild(retryBtn);
+
+    // Copy button (placed after Try Again)
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = '📋 Copy';
+    copyBtn.addEventListener('click', () => {
+      // copy original raw text (unescaped) for best UX
+      const raw = text ?? '';
+      navigator.clipboard.writeText(raw).then(() => {
+        copyBtn.textContent = '✔️ Copied';
+        copyBtn.disabled = true;
+        setTimeout(() => {
+          copyBtn.textContent = '📋 Copy';
+          copyBtn.disabled = false;
+        }, 1500);
+      }).catch(() => {
+        copyBtn.textContent = 'Failed';
+        setTimeout(() => copyBtn.textContent = '📋 Copy', 1500);
+      });
+    });
+    actions.appendChild(copyBtn);
+
+    // assemble
+    botMessage.appendChild(messageText);
+    botMessage.appendChild(actions);
+    chatBox.appendChild(botMessage);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  // ========== History management ==========
+  function addToHistory(prompt) {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    // push to start of history
+    historyPrompts.unshift(trimmed);
+    renderHistory();
+  }
+
+  function renderHistory() {
+    chatHistoryList.innerHTML = '';
+    historyPrompts.forEach((p, idx) => {
+      const li = document.createElement('li');
+      li.className = 'history-item';
+      li.textContent = p.length > 28 ? p.slice(0, 28) + '...' : p;
+      li.title = p;
+      li.style.cursor = 'pointer';
+      li.addEventListener('click', () => {
+        // when a history item is clicked, send it (and show user bubble)
+        sendMessage(p, { fromHistory: true });
+      });
+      chatHistoryList.appendChild(li);
+    });
+  }
+
+  // ========== New chat handler ==========
+  newChatBtn.addEventListener('click', () => {
+    chatBox.innerHTML = '';
+    inputEl.value = '';
+    // do not clear history by default
   });
-  const data = await res.json();
-  chatBox.innerHTML += `<div class="bot-msg">${data.reply}</div>`;
-  chatBox.scrollTop = chatBox.scrollHeight;
-}
-</script>
+
+  // ========== Sending message ==========
+  // options: { fromRetry: boolean, fromHistory: boolean }
+  async function sendMessage(prompt = null, options = {}) {
+    const message = (typeof prompt === 'string' && prompt !== null) ? prompt : inputEl.value.trim();
+    if (!message) return;
+
+    // show user bubble
+    appendUserMessage(message);
+
+    // save to history only when user typed message (not when coming from history click or retry)
+    if (!options.fromHistory && !options.fromRetry) {
+      addToHistory(message);
+      inputEl.value = '';
+    }
+
+    // disable send button while awaiting
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending...';
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        data = { reply: '⚠️ Error: Invalid JSON response from server.' };
+      }
+
+      const reply = data && (data.reply ?? data.response ?? data.text) ? (data.reply ?? data.response ?? data.text) : 'No response from server.';
+      addBotMessage(reply, message);
+    } catch (err) {
+      addBotMessage('⚠️ Error: Could not connect to server.', message);
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  }
+
+  // wire up send button + enter key
+  sendBtn.addEventListener('click', () => sendMessage());
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // initial render of (empty) history if any
+  renderHistory();
+  </script>
 </body>
 </html>
