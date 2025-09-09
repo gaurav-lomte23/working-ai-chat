@@ -8,6 +8,10 @@ An **AI-powered chat application** built with **Node.js**, **Express**, and **Mi
 
 ---
 
+## 🖼️ Preview
+![App Screenshot](./mistral-ai 1.png)
+![App Screenshot](./mistral-ai 2.png)
+
 
 
 
@@ -111,4 +115,5 @@ This project is licensed under the **MIT License**.
 💡 Built with ❤️ by [Gaurav Lomte](https://github.com/gaurav-lomte23)
 
 ---
+
 
